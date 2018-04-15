@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang='en'>
+  <head>
+    <title>Fort Collins Happy Hour Map</title>
+    <meta charset='utf-8' />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta content='' name='description' />
+    <meta content='' name='author' />
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="css/custom.css"/>
+    <!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
+    <!--[if lt IE 9]>
+      <script type="text/javascript" src="https://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+      
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+
+    <script src="https://maps.googleapis.com/maps/api/js"></script>
+    <script src="lib/jquery/jquery-1.8.2.min.js"></script>
+    <script src="cordova.js"></script>
+    <script>
+var pin = [
+    {"name":"The Crown Pub","lat":"40.586255","lng":"-105.076543","desc":"  Inviting English-style brewpub with inventive cocktails & creative global takes on tavern fare."},
+    {"name":"Social","lat":"40.5872801","lng":"-105.0783097","desc":"  Industrial basement speakeasy with specialty cocktails, charcuterie & an ample absinthe selection."},
+    {"name":"Elliot's Martini Bar","lat":"40.5884398","lng":"-105.0766902","desc":"  Handcrafted cocktails & light bites served in a stylish space with huge windows & secluded booths"},
+    {"name":"Coopersmith's Pub & Brewing","lat":"40.587348","lng":"-105.07566","desc":"  Big buzzy mainstay with billiards & patios where classic tavern fare is matched to a long beer list."},
+    {"name":"The Mayor of Old Town","lat":"40.578889","lng":"-105.078713","desc":"  An ample local & international beer list served in a high-ceilinged taproom with an outdoor patio."},
+    {"name":"Trailhead Tavern","lat":"40.587235","lng":"-105.078429","desc":"  Rustic roadhouse for microbrews, burgers & hearty pub fare, plus foosball, pool & flat-screen TVs."},
+    {"name":"Bar Louie","lat":"40.542339","lng":"-105.072624","desc":""},
+    {"name":"CB & Potts","lat":"40.543631","lng":"-105.073941","desc":""},
+    {"name":"The Forge Public House","lat":"40.58881","lng":"-105.07551","desc":""},
+    {"name":"Tap & Handle","lat":"40.583739","lng":"-105.077551","desc":""},
+    {"name":"Blind Pig","lat":"40.588191","lng":"-105.074905","desc":""},
+    {"name":"Avogadro's Number","lat":"40.579534","lng":"-105.079213","desc":""}
+];        
+var markersArray = [], bounds;
+var myLat = 0, myLng = 0; 
+var bearing, distance;
+var dataStatus = 0;                
+// setup map and listen to deviceready        
+$( document ).ready(function() {
+    document.addEventListener("deviceready", onDeviceReady, false);
+});
+// start device compass, accelerometer and geolocation after deviceready        
+function onDeviceReady() {
+
+    //navigator.splashscreen.hide();
+    startCamera();
+
+    setupMap();
+
+    // start cordova device sensors
+    startAccelerometer();
+    startCompass();
+    startGeolocation();
+}
+
+function startCamera() {
+    ezar.initializeVideoOverlay(
+        function() {
+            ezar.getBackCamera().start();
+        },
+        function(error) {
+            alert("ezar initialization failed");
+        });
+}  
+
+
+// setup google maps api        
+function setupMap(){
+    $("#map").height($(window).height()-60);
+    var mapOptions = {
+        zoom: 16,
+        mapTypeControl: false,
+        streetViewControl: false,
+        navigationControl: true,
+        scrollwheel: false,
+        navigationControlOptions: {style: google.maps.NavigationControlStyle.SMALL},
+        mapTypeId: google.maps.MapTypeId.ROADMAP,
+        styles: [{"featureType":"water","elementType":"geometry","stylers":[{"color":"#e9e9e9"},{"lightness":17}]},{"featureType":"landscape","elementType":"geometry","stylers":[{"color":"#f5f5f5"},{"lightness":20}]},{"featureType":"road.highway","elementType":"geometry.fill","stylers":[{"color":"#ffffff"},{"lightness":17}]},{"featureType":"road.highway","elementType":"geometry.stroke","stylers":[{"color":"#ffffff"},{"lightness":29},{"weight":0.2}]},{"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"#ffffff"},{"lightness":18}]},{"featureType":"road.local","elementType":"geometry","stylers":[{"color":"#ffffff"},{"lightness":16}]},{"featureType":"poi","elementType":"geometry","stylers":[{"color":"#f5f5f5"},{"lightness":21}]},{"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#dedede"},{"lightness":21}]},{"elementType":"labels.text.stroke","stylers":[{"visibility":"on"},{"color":"#ffffff"},{"lightness":16}]},{"elementType":"labels.text.fill","stylers":[{"saturation":36},{"color":"#333333"},{"lightness":40}]},{"elementType":"labels.icon","stylers":[{"visibility":"off"}]},{"featureType":"transit","elementType":"geometry","stylers":[{"color":"#f2f2f2"},{"lightness":19}]},{"featureType":"administrative","elementType":"geometry.fill","stylers":[{"color":"#fefefe"},{"lightness":20}]},{"featureType":"administrative","elementType":"geometry.stroke","stylers":[{"color":"#fefefe"},{"lightness":17},{"weight":1.2}]}]
+        
+    };
+    map = new google.maps.Map(document.getElementById("map"), mapOptions);
+}        
+// toggle between list view and map view        
+function toggleView(){
+    if($(".listView").is(":visible")){
+        $(".listView").hide();
+        $("#map").height($(window).height()-60);
+        $(".mapView").fadeIn(
+            function(){
+                google.maps.event.trigger(map, "resize");
+                map.fitBounds(bounds);
+            });
+        $("#viewbtn").html("List");
+    } else {
+        $(".mapView").hide();
+        $(".listView").fadeIn();
+        $("#viewbtn").html("Map");
+    }
+}
+// get data from API and store in array, add to list view and create markers on map, calculate         
+function loadData(){
+    dataStatus = "loading";
+    markersArray = [];
+    bounds = new google.maps.LatLngBounds();
+    // add blue gps marker
+    var icon = new google.maps.MarkerImage('http://www.google.com/intl/en_us/mapfiles/ms/micons/blue-dot.png',new google.maps.Size(30, 28),new google.maps.Point(0,0),new google.maps.Point(9, 28));
+    var gpsMarker = new google.maps.Marker({position: new google.maps.LatLng(myLat, myLng), map: map, title: "My Position", icon:icon});
+    bounds.extend(new google.maps.LatLng(myLat, myLng));
+    markersArray.push(gpsMarker);
+    // add all location markers to map and list view and array
+    for(var i=0; i< pin.length; i++){
+        $(".listItems").append("<div class='item'>"+pin[i].name+"    "+pin[i].desc+"</div>");
+        addMarker(i);
+        relativePosition(i);
+    }
+    map.fitBounds(bounds);
+    google.maps.event.trigger(map, "resize");
+    dataStatus = "loaded";   
+}
+// add marker to map and in array        
+function addMarker(i){
+	var marker = new google.maps.Marker({position: new google.maps.LatLng(pin[i].lat, pin[i].lng), map: map, title: pin[i].name});
+	bounds.extend(new google.maps.LatLng(pin[i].lat, pin[i].lng));
+	markersArray.push(marker);
+} 
+// clear all markers from map and array        
+function clearMarkers() {
+	while (markersArray.length) {
+		markersArray.pop().setMap(null);
+	}
+}        
+// calulate distance and bearing value for each of the points wrt gps lat/lng    
+    function relativePosition(i){
+    var pinLat = pin[i].lat;
+    var pinLng = pin[i].lng;
+    var dLat = (myLat-pinLat)* Math.PI / 180;
+    var dLon = (myLng-pinLng)* Math.PI / 180;
+    var lat1 = pinLat * Math.PI / 180;
+    var lat2 = myLat * Math.PI / 180;
+    var y = Math.sin(dLon) * Math.cos(lat2);
+    var x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+    bearing = Math.atan2(y, x) * 180 / Math.PI;
+    bearing = bearing + 180;
+    pin[i]['bearing'] = bearing;
+    
+    var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2); 
+    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+    distance = 3958.76  * c;
+    pin[i]['distance'] = distance;
+}
+// calculate direction of points and display        
+function calculateDirection(degree){
+    var detected = 0;
+    $("#spot").html("");
+    for(var i=0;i<pin.length;i++){
+        if(Math.abs(pin[i].bearing - degree) <= 20){
+            var away, fontSize, fontColor;
+            // varry font size based on distance from gps location
+            if(pin[i].distance>15){
+                away = Math.round(pin[i].distance);
+                display:none;
+            }else if(pin[i].distance>5){
+                away = Math.round(pin[i].distance);
+                fontSize = "8";
+                fontColor = "#000";
+               
+            } 
+            else if(pin[i].distance>2){
+                away = Math.round(pin[i].distance);
+                fontSize = "18";
+                fontColor = "#6e6e6e";
+                
+            } else {
+                away = pin[i].distance.toFixed(2);
+                fontSize = "30";
+                fontColor = "#eee";
+                
+            }
+            $("#spot").append('<div class="name" data-id="'+i+'" style="margin-left:'+(((pin[i].bearing - degree) * 5)+50)+'px;width:'+($(window).width()-100)+'px;font-size:'+fontSize+'px;color:'+fontColor+'">'+pin[i].name+'<div class="distance">'+ away +' miles away</div></div>');
+            detected = 1;
+        } else {
+            if(!detected){
+                $("#spot").html("");
+            }
+        }
+    }
+    
+} 
+        
+// Start watching the geolocation        
+function startGeolocation(){
+    var options = { timeout: 30000 };
+    watchGeoID = navigator.geolocation.watchPosition(onGeoSuccess, onGeoError, options);
+}
+        
+// Stop watching the geolocation
+function stopGeolocation() {
+    if (watchGeoID) {
+        navigator.geolocation.clearWatch(watchGeoID);
+        watchGeoID = null;
+    }
+}
+        
+// onSuccess: Get the current location
+function onGeoSuccess(position) {
+    document.getElementById('geolocation').innerHTML = 'Latitude: ' + position.coords.latitude + '<br />' + 'Longitude: ' + position.coords.longitude;
+    myLat = position.coords.latitude;
+    myLng = position.coords.longitude;
+    if(!dataStatus){
+        loadData();
+    }
+}
+// onError: Failed to get the location
+function onGeoError() {
+    document.getElementById('log').innerHTML += "onError=.";
+} 
+    
+// Start watching the compass
+function startCompass() {
+    var options = { frequency: 100 };
+    watchCompassID = navigator.compass.watchHeading(onCompassSuccess, onCompassError, options);
+}
+// Stop watching the compass
+function stopCompass() {
+    if (watchCompassID) {
+        navigator.compass.clearWatch(watchCompassID);
+        watchCompassID = null;
+    }
+}
+// onSuccess: Get the current heading
+function onCompassSuccess(heading) {
+    var directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'N'];
+    var direction = directions[Math.abs(parseInt((heading.magneticHeading) / 45) + 1)];
+    document.getElementById('compass').innerHTML = heading.magneticHeading + "<br>" + direction;
+    document.getElementById('direction').innerHTML = direction;
+    var degree = heading.magneticHeading;
+    if($("#arView").is(":visible") && dataStatus != "loading"){
+        calculateDirection(degree);
+    }
+}
+// onError: Failed to get the heading
+function onCompassError(compassError) {
+    document.getElementById('log').innerHTML += "onError=."+compassError.code;
+}        
+        
+// Start checking the accelerometer
+function startAccelerometer() {
+    var options = { frequency: 100 };
+    watchAccelerometerID = navigator.accelerometer.watchAcceleration(onAccelerometerSuccess, onAccelerometerError, options);
+}
+// Stop checking the accelerometer
+function stopAccelerometer() {
+    if (watchAccelerometerID) {
+        navigator.accelerometer.clearWatch(watchAccelerometerID);
+        watchAccelerometerID = null;
+    }
+}
+// onSuccess: Get current accelerometer values
+function onAccelerometerSuccess(acceleration) {
+    // for debug purpose to print out accelerometer values
+	var element = document.getElementById('accelerometer');
+    element.innerHTML = 'Acceleration X: ' + acceleration.x + '<br />' +
+                        'Acceleration Y: ' + acceleration.y + '<br />' +
+                        'Acceleration Z: ' + acceleration.z ;
+    if(acceleration.y > 7){
+        $("#arView").fadeIn();
+        $("#topView").hide();
+        // document.getElementById('body').style.background = "#d22";
+        document.getElementById('body').style.background = "transparent";
+    } else {
+        $("#arView").hide();
+        $("#topView").fadeIn();
+        document.getElementById('body').style.background = "#fff";
+    }
+}
+// onError: Failed to get the acceleration
+function onAccelerometerError() {
+    document.getElementById('log').innerHTML += "onError.";
+}
+
+ function doSnapshot() {
+        //hide snapbtn so it will not be in snapshot image
+        document.getElementById("snapbtn").style.display = "none";
+        
+        //give dom chance to hide snapbtn before image capture
+        setTimeout( function() { 
+            ezar.snapshot(  
+                function(data) {
+                    alert("Snapshot complete.\nSee Gallery for image");
+                    document.getElementById("snapbtn").style.display = "block";
+                }, 
+                function(err) {
+                    alert("Error: " + err);
+                    document.getElementById("snapbtn").style.display = "block";
+                },
+                {"saveToPhotoAlbum":true}
+            )}, 10);
+    } 
+    </script>
+    <style>
+body {background-color:transparent;font-family:Arial;margin:0;overflow-x:hidden;-webkit-user-select: none;}
+.navbar {background-color:#222;height:40px;padding:10px;text-align:center;color:#fff;font-size:20px;font-weight:bold;line-height:40px;}
+.navtitle {text-align:center;margin:auto}
+.navbtn {background-color:#333;padding:5px 10px;height:30px;color:#fff;font-size:18px;font-weight:bold;line-height:30px;border-radius:4px;border:1px solid #666} 
+#actionbtn {float:right;}
+#viewbtn {float:left;}
+.query {padding:10px;background-color:#aaa;border-bottom:1px solid #fff;font-size:14px;font-weight:bold;color:#222;}
+.item {padding:20px 10px; background-color:#eee;border-bottom:1px solid #fff;font-size:18px;color:#333;text-shadow:0 1px #fff}
+.searchbox {padding:5px;background-color:#eee;border-bottom:1px solid #fff;}
+#search {box-sizing: border-box;width:100%;height:40px;font-size:16px;border-radius:20px;border:1px solid #bbb}
+.mapView {display:none}
+#map {height:200px;}
+#arView, #topView {display:none;}
+#arView{padding:30px 0; height:70px;text-align:center}
+.arMessage {color:#ddd;font-size:14px}
+#spot {text-align:center}
+.name, .distance {text-shadow:0 1px #666}
+.name {padding:15px;font-weight:bold;background-color:rgba(204,34,34,0.5);border-radius:40px;margin-bottom:10px}
+#direction {color:#fff;font-size:20px;padding:15px;font-weight:bold;;background-color:#a22;border-radius:40px;display:inline-block;margin-bottom:10px;width:40px;line-height:40px}
+.distance {font-size:14px;font-weight:normal;}
+#debug {border:1px solid #999;display:none}
+.heading {background-color:#999;color:#eee;padding:5px;}
+#compass, #accelerometer, #geolocation {padding:5px}
+
+.snap {
+    position: absolute;
+    right: 31px;
+    bottom: 26px;
+}
+
+.attributing {
+    color: rgb(255, 213, 0);
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+}
+    </style>
+    
+      
+      
+  </head>
+  <body>
+      <div id="arView" style="background-color: transparent">
+        <div class="arMessage">&uarr;<br>Tilt down to see all places</div>
+        <br>
+        <div class="arMessage">&larr; Move the device around to find spots &rarr;</div>
+        <br>
+        <div id="direction"></div>
+        <br>
+        <div id="spot"></div>
+         <!--<div class="attributing">
+            Orange House
+        </div>-->
+    </div>
+    <div id="topView" style="background-color: white">
+        <div class="navbar">
+            <!--<div id="actionbtn" class="navbtn"> &crarr; </div>-->
+            <div id="viewbtn" class="navbtn" onclick="toggleView()">Map</div>    
+            <div class="navtitle">Nearby</div> 
+        </div>
+        <div class="listView">
+            <div class="listItems"></div>
+                 </div>
+        <div class="mapView">
+            <div id="map"></div>
+        </div>
+    </div>
+    <div id="debug">  
+        <div class="heading">Geolocation</div>
+        <div id="geolocation"></div>
+        <div class="heading">Compass</div>
+        <div id="compass"></div>
+        <div class="heading">Accelerometer</div>
+        <div id="accelerometer"></div>
+        <div class="heading">Log</div>
+        <div id="log"></div>
+    </div>      
+      
+      
+      
+    <div class='navbar navbar-default navbar-static-top'>
+      <div class='container-fluid'>
+        <div class="navbar-header">
+          <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+            <span class="icon-bar"></span>
+          </button>
+          <a class='navbar-brand' href='index.html'>Fort Collins Happy Hour Map</a>
+        </div>
+        <div class="navbar-collapse collapse">
+          <ul class="nav navbar-nav navbar-right">
+            <li class='active'><a href="index.html">Map</a></li>
+            <li><a href="#">About</a></li>
+          </ul>
+        </div><!--/.nav-collapse -->
+      </div>
+    </div>
+    <div class='container-fluid'>
+      <div class='row'>
+        <div class='col-md-4'>
+           <div class='well'>
+            <h4>
+              Address <small>(<a id='find_me' href='#'>find me</a>)</small>
+            </h4>
+            <p>
+              <input class='form-control' id='search_address' placeholder='Enter an address or an intersection' type='text' />
+            </p>
+            <p>
+              <label>
+                within
+                <select id='search_radius'>
+                  <option value='400'>2 blocks</option>
+                  <option value='805'>1/2 mile</option>
+                  <option value='1610'>1 mile</option>
+                  <option value='3220'>2 miles</option>
+                </select>
+              </label>
+            </p>
+
+            <br />
+            <h4>Custom filters and views</h4>
+            <p>Take a look at the <a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples'>wiki</a> to see how to add your own custom filters and views like:</p>
+            <div class='row'>
+              <div class='col-md-6'>
+                <ul>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-checkboxes'>Checkboxes</a></li>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-radiobuttons'>Radio buttons</a></li>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-drop-down-lists'>Drop down lists</a></li>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-textsearches'>Text searches</a></li>
+                </ul>
+              </div>
+              <div class='col-md-6'>
+                <ul>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-sliders'>Sliders</a></li>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/Filter-examples#wiki-date-sliders'>Date sliders</a></li>
+                  <li><a href='https://github.com/derekeder/FusionTable-Map-Template/wiki/List-search-results'>Results lists</a></li>
+                </ul>
+              </div>
+            </div>
+            <br />
+            <a class='btn btn-primary' id='search' href='#'>
+              <i class='glyphicon glyphicon-search'></i>
+              Search
+            </a>
+            <a class='btn btn-default' id='reset' href='#'>
+              <i class='glyphicon glyphicon-repeat'></i>
+              Reset
+            </a>
+			
+          </div>
+          <div class='alert alert-info' id='result_box' ><strong id='result_count'></strong></div>
+		  <div class='well'>
+  			<div id='results_list'></div>
+			</div>
+        </div>
+        <div class='col-md-8'>
+          <noscript>
+            <div class='alert alert-info'>
+              <h4>Your JavaScript is disabled</h4>
+              <p>Please enable JavaScript to view the map.</p>
+            </div>
+          </noscript>
+          <div id='map_canvas'></div>
+          <p class='pull-right'>
+            <a href='http://derekeder.com/searchable_map_template/'>Searchable Map Template</a> by <a href='http://derekeder.com'>Derek Eder</a>.
+        </p>
+        </div>
+      </div>
+    </div>
+
+    <script type="text/javascript" src="js/jquery-1.12.4.min.js"></script>
+    <script type="text/javascript" src="js/jquery.address.js"></script>
+    <script type="text/javascript" src="js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="https://maps.google.com/maps/api/js?sensor=false&libraries=places&key=AIzaSyAmr9TLi33X3L4upB2ln-sxLyEexlBp5Ks"></script>
+    <script type="text/javascript" src="js/maps_lib.js"></script>
+    <script type='text/javascript'>
+      //<![CDATA[
+        $(window).resize(function () {
+          var h = $(window).height(),
+            offsetTop = 105; // Calculate the top offset
+        
+          $('#map_canvas').css('height', (h - offsetTop));
+        }).resize();
+        
+        $(function() {
+          var myMap = new MapsLib({
+            fusionTableId:      "1xuxE_TpoqwtoGk_7Afszmp2L1Pk_tdOvsbC_AU5u",
+            googleApiKey:       "AIzaSyAmr9TLi33X3L4upB2ln-sxLyEexlBp5Ks",
+            locationColumn:     "Location",
+            map_center:         [40.587348, -105.075660],
+			defaultZoom:		16,
+            
+          });
+
+          var autocomplete = new google.maps.places.Autocomplete(document.getElementById('search_address'));
+      
+          $(':checkbox').click(function(){
+            myMap.doSearch();
+          });
+
+          $(':radio').click(function(){
+            myMap.doSearch();
+          });
+          
+          $('#search_radius').change(function(){
+            myMap.doSearch();
+          });
+          
+          $('#search').click(function(){
+            myMap.doSearch();
+          });
+          
+          $('#find_me').click(function(){
+            myMap.findMe(); 
+            return false;
+          });
+          
+          $('#reset').click(function(){
+            myMap.reset(); 
+            return false;
+          });
+          
+          $(":text").keydown(function(e){
+              var key =  e.keyCode ? e.keyCode : e.which;
+              if(key === 13) {
+                  $('#search').click();
+                  return false;
+              }
+          });
+        });
+      //]]>
+    </script>
+  </body>
+</html>
